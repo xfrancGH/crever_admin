@@ -68,7 +68,7 @@ if 'df' not in st.session_state:
     st.session_state.ws = ws
 
 st.set_page_config(page_title="Math Archive Pro", layout="wide")
-tab1, tab2 = st.tabs(["➕ Inserimento", "🔍 Archivio"])
+tab1, tab2, tab3 = st.tabs(["➕ Inserimento", "🔍 Archivio", "📊 Statistiche"])
 
 # --- TAB 1: INSERIMENTO ---
 with tab1:
@@ -309,3 +309,114 @@ with tab2:
 
                                     # Riavvia l'app per mostrare i nuovi dati nei filtri e negli expander
                                     st.rerun()
+
+# --- TAB 3: STATISTICHE (Versione High-Readability) ---
+with tab3:
+    df_tree = st.session_state.df.copy()
+
+    if not df_tree.empty:
+        # 1. TOTALONE IN CIMA
+        st.subheader("Riepilogo Generale")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Esercizi Totali", len(df_tree), delta=None)
+        with c2:
+            num_arg = len(df_tree['ARGOMENTO'].unique())
+            st.metric("Argomenti Coperti", num_arg)
+        with c3:
+            avg_diff = pd.to_numeric(df_tree['LIVELLO'], errors='coerce').mean()
+            st.metric("Difficoltà Media", f"{avg_diff:.1f} / 5")
+
+        st.divider()
+        st.subheader("Esplora la Struttura")
+
+        # Ordinamento per coerenza visiva
+        df_tree = df_tree.sort_values(['DISCIPLINA', 'TIPO', 'ARGOMENTO', 'SUBARGOMENTO'])
+        
+        # --- ALBERO GERARCHICO ---
+        for disc in sorted(df_tree['DISCIPLINA'].unique()):
+            df_d = df_tree[df_tree['DISCIPLINA'] == disc]
+            
+            # LIVELLO 1: DISCIPLINA
+            with st.expander(f"📁 **{disc.upper()}** — ({len(df_d)} esercizi)", expanded=False):
+                
+                # LIVELLO 2: TIPO
+                for t in sorted(df_d['TIPO'].unique()):
+                    df_t = df_d[df_d['TIPO'] == t]
+                    label_t = "Aperto" if t == "A" else "Chiuso"
+                    
+                    with st.expander(f"📄 **Tipo {t}** ({label_t}) — {len(df_t)} esercizi"):
+                        
+                        # LIVELLO 3: ARGOMENTO
+                        for arg in sorted(df_t['ARGOMENTO'].unique()):
+                            df_a = df_t[df_t['ARGOMENTO'] == arg]
+                            
+                            with st.expander(f"🔹 {arg} ({len(df_a)})"):
+                                
+                                # LIVELLO 4: SUBARGOMENTO (Punto finale)
+                                for sub in sorted(df_a['SUBARGOMENTO'].unique()):
+                                    df_s = df_a[df_a['SUBARGOMENTO'] == sub]
+                                    
+                                    # Layout riga finale: Subargomento a sinistra, Badge a destra
+                                    col_sub, col_lev = st.columns([2, 3])
+                                    
+                                    with col_sub:
+                                        st.markdown(f"**{sub}** ({len(df_s)})")
+                                    
+                                    with col_lev:
+                                        # Creiamo dei badge neutri per i livelli
+                                        lv_counts = df_s['LIVELLO'].value_counts()
+                                        badge_cols = st.columns(5) # Spazio per i 5 livelli
+                                        
+                                        for i in range(1, 6):
+                                            # Cerchiamo il conteggio (gestendo sia stringhe che int)
+                                            count = lv_counts.get(str(i), 0) or lv_counts.get(i, 0)
+                                            
+                                            # Stile Neutro: Grigio chiaro se > 0, quasi bianco se 0
+                                            bg_color = "#e0e0e0" if count > 0 else "#f9f9f9"
+                                            text_color = "#000000" if count > 0 else "#cccccc"
+                                            font_weight = "bold" if count > 0 else "normal"
+                                            border_style = "1px solid #ccc" if count > 0 else "1px dashed #eee"
+                                            
+                                            badge_cols[i-1].markdown(
+                                                f"""<div style="
+                                                    background-color:{bg_color}; 
+                                                    color:{text_color}; 
+                                                    padding:2px 4px; 
+                                                    border-radius:4px; 
+                                                    text-align:center;
+                                                    font-size:14px;
+                                                    font-weight:{font_weight};
+                                                    border:{border_style};
+                                                ">Liv.{i}--> {count}</div>""", 
+                                                unsafe_allow_html=True
+                                            )
+                                    st.markdown("<div style='margin-bottom: -10px; border-bottom: 1px solid #f0f2f6;'></div>", unsafe_allow_html=True)
+        
+        st.divider()
+        st.subheader("💡 Suggerimenti per il tuo Archivio")
+        c_cons1, c_cons2 = st.columns(2)
+
+        with c_cons1:
+            # Trova i Subargomenti "Deboli"
+            weak_subs = df_tree.groupby(['ARGOMENTO', 'SUBARGOMENTO']).size()
+            weak_subs = weak_subs[weak_subs == 1].reset_index(name='count')
+            
+            st.markdown("**🌱 Subargomenti da potenziare (solo 1 esercizio):**")
+            if not weak_subs.empty:
+                for _, row in weak_subs.head(5).iterrows(): # Mostriamo i primi 5
+                    st.write(f"- {row['ARGOMENTO']} > {row['SUBARGOMENTO']}")
+            else:
+                st.success("Ottimo! Ogni subargomento ha almeno 2 esercizi.")
+
+        with c_cons2:
+            # Analisi Copertura Immagini
+            st.markdown("**🖼️ Copertura Visiva per Disciplina:**")
+            img_analysis = df_tree.copy()
+            img_analysis['has_img'] = img_analysis['IMMAGINE'].astype(str).str.contains("http")
+            img_stats = img_analysis.groupby('DISCIPLINA')['has_img'].mean() * 100
+            
+            for disc, perc in img_stats.items():
+                st.write(f"- {disc}: **{perc:.0f}%** con immagini")
+    else:
+        st.info("Nessun dato presente nel database.")

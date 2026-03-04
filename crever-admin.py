@@ -4,6 +4,7 @@ import requests
 import base64
 import gspread
 import os
+import time
 from google.oauth2.service_account import Credentials
 
 # --- 1. CONFIGURAZIONE E CACHE ---
@@ -74,20 +75,25 @@ with tab1:
     st.header("Nuovo Esercizio")
     df_m = st.session_state.df
 
-    # 1. DISCIPLINA
-    all_disc = sorted(df_m['DISCIPLINA'].unique().tolist()) if not df_m.empty else ["Matematica", "Fisica"]
-    disciplina = st.selectbox("Disciplina", all_disc)
-    filtered_args = sorted(df_m[df_m['DISCIPLINA'] == disciplina]['ARGOMENTO'].unique().tolist())
-        
     # --- LOGICA A CASCATA (FUORI DAL FORM PER REATTIVITÀ) ---
     c1, c2 = st.columns(2)
-    
     with c1:
+        # 1. DISCIPLINA
+        all_disc = sorted(df_m['DISCIPLINA'].unique().tolist()) if not df_m.empty else ["Matematica", "Fisica"]
+        disciplina = st.selectbox("Disciplina", all_disc)
+        filtered_args = sorted(df_m[df_m['DISCIPLINA'] == disciplina]['ARGOMENTO'].unique().tolist())
+    with c2:
+        # Calcolo dell'ID per il prossimo inserimento
+        next_id_display = int(st.session_state.df['ID'].max() + 1) if not st.session_state.df.empty else 0
+        st.text_input("ID Prossimo Esercizio", value=next_id_display, disabled=True)
+        
+    # --- LOGICA A CASCATA (FUORI DAL FORM PER REATTIVITÀ) ---
+    c3, c4 = st.columns(2)
+    with c3:
         # 2. ARGOMENTO (Filtrato)
         arg_sel = st.selectbox("Seleziona Argomento", ["+ NUOVO ARGOMENTO"] + filtered_args)
         arg_final = st.text_input("Digita nome nuovo Argomento") if arg_sel == "+ NUOVO ARGOMENTO" else arg_sel
-
-    with c2:
+    with c4:
         # 4. SUBARGOMENTO (Filtrato)
         if arg_sel != "+ NUOVO ARGOMENTO":
             filtered_subs = sorted(df_m[df_m['ARGOMENTO'] == arg_sel]['SUBARGOMENTO'].unique().tolist())
@@ -99,11 +105,11 @@ with tab1:
 
     # --- FORM PER IL RESTO DEI CAMPI ---
     with st.form("insert_form", clear_on_submit=True):
-        c3, c4 = st.columns(2)
-        with c3:
+        c5, c6 = st.columns(2)
+        with c5:
             tipo_ui = st.selectbox("Tipo", ["A - Aperto", "C - Chiuso"])
             comando = st.text_input("Comando")
-        with c4:
+        with c6:
             livello = st.selectbox("Livello", [1, 2, 3, 4, 5])
             soluzione = st.text_input("Soluzione (LaTeX)")
 
@@ -144,65 +150,162 @@ with tab1:
                 st.session_state.ws = new_ws
                 
                 st.success(f"✅ Esercizio salvato con ID {new_id}!")
+                # 2. Piccolo ritardo (es. 2 secondi)
+                time.sleep(2)                
                 
                 # 3. RE-RUN PER AGGIORNARE I WIDGET
                 st.rerun()
 
 
-# --- TAB 2: ARCHIVIO (Paginazione Anti-Lentezza) ---
+# --- TAB 2: ARCHIVIO ---
 with tab2:
-    df_view = st.session_state.df
+    st.header("Ricerca e Gestione Esercizi")
     
-    # Filtri Dashboard
-    f1, f2, f3 = st.columns([2,1,1])
-    with f1: s_search = st.text_input("Cerca nel testo LaTeX:")
-    with f2: s_arg = st.selectbox("Filtra per Argomento", ["Tutti"] + sorted(df_view['ARGOMENTO'].unique().tolist()))
-    with f3: s_id = st.number_input("Cerca ID", min_value=0, step=1)
+    # Usiamo i dati in session_state per la massima velocità
+    df_v = st.session_state.df.copy()
 
-    # Logica Filtro
-    if s_search: df_view = df_view[df_view['ESERCIZIO'].str.contains(s_search, case=False, na=False)]
-    if s_arg != "Tutti": df_view = df_view[df_view['ARGOMENTO'] == s_arg]
-    if s_id > 0: df_view = df_view[df_view['ID'] == s_id]
+    # --- FILTRI IN COLONNA (ORDINE RICHIESTO) ---
+    f_col = st.columns(5)
+    
+    with f_col[0]:
+        # 1. DISCIPLINA
+        list_disc = ["Tutti"] + sorted(df_v['DISCIPLINA'].unique().tolist())
+        s_disc = st.selectbox("Disciplina", list_disc, key="filter_disc")
+        if s_disc != "Tutti":
+            df_v = df_v[df_v['DISCIPLINA'] == s_disc]
 
-    # PAGINAZIONE (Fondamentale per la CPU)
-    items_per_page = 20
-    total_items = len(df_view)
-    num_pages = (total_items // items_per_page) + 1
-    
-    c_pag1, c_pag2 = st.columns([1, 4])
-    with c_pag1:
-        page = st.number_input("Pagina", min_value=1, max_value=num_pages, step=1)
-    
-    start = (page - 1) * items_per_page
-    end = start + items_per_page
-    
-    st.write(f"Visualizzazione record {start} - {min(end, total_items)} di {total_items}")
+    with f_col[1]:
+        # 2. TIPO
+        list_tipo = ["Tutti"] + sorted(df_v['TIPO'].unique().tolist())
+        s_tipo = st.selectbox("Tipo", list_tipo, key="filter_tipo")
+        if s_tipo != "Tutti":
+            df_v = df_v[df_v['TIPO'] == s_tipo]
 
-    for _, r in df_view.iloc[start:end].iterrows():
-        with st.expander(f"ID {r['ID']} | {r['ARGOMENTO']} | {str(r['ESERCIZIO'])[:60]}..."):
-            col_l, col_r = st.columns([1, 2])
-            
-            with col_l:
-                # Caricamento immagine solo se checkbox attivo
-                img_url = r['IMMAGINE'].split('"')[1] if 'http' in str(r['IMMAGINE']) else None
-                if img_url:
-                    if st.checkbox("👁️ Immagine", key=f"v_{r['ID']}"):
-                        st.image(img_url, use_container_width=True)
-                else: st.info("No img")
-            
-            with col_r:
-                st.latex(r['ESERCIZIO'])
-                st.caption(f"Comando: {r['COMANDO']} | Livello: {r['LIVELLO']}")
-                if r['SOLUZIONE']: st.success(f"Soluzione: {r['SOLUZIONE']}")
+    with f_col[2]:
+        # 3. ARGOMENTO (Filtrato dai precedenti)
+        list_arg = ["Tutti"] + sorted(df_v['ARGOMENTO'].unique().tolist())
+        s_arg = st.selectbox("Argomento", list_arg, key="filter_arg")
+        if s_arg != "Tutti":
+            df_v = df_v[df_v['ARGOMENTO'] == s_arg]
+
+    with f_col[3]:
+        # 4. SUBARGOMENTO (Filtrato dai precedenti)
+        list_sub = ["Tutti"] + sorted(df_v['SUBARGOMENTO'].unique().tolist())
+        s_sub = st.selectbox("Subargomento", list_sub, key="filter_sub")
+        if s_sub != "Tutti":
+            df_v = df_v[df_v['SUBARGOMENTO'] == s_sub]
+
+    with f_col[4]:
+        # 5. LIVELLO
+        # Assicuriamoci che LIVELLO sia trattato come stringa o numero pulito per il filtro
+        list_liv = ["Tutti"] + sorted([str(x) for x in df_v['LIVELLO'].unique() if pd.notna(x)])
+        s_liv = st.selectbox("Livello", list_liv, key="filter_liv")
+        if s_liv != "Tutti":
+            df_v = df_v[df_v['LIVELLO'].astype(str) == s_liv]
+
+    # Ricerca testuale libera
+    s_search = st.text_input("🔍 Cerca parole chiave nel testo LaTeX:", key="filter_search")
+    if s_search:
+        df_v = df_v[df_v['ESERCIZIO'].str.contains(s_search, case=False, na=False)]
+
+    st.divider()
+
+    # --- VISUALIZZAZIONE E PAGINAZIONE ---
+    total_results = len(df_v)
+    st.write(f"Risultati trovati: **{total_results}**")
+
+    if total_results > 0:
+        items_per_page = 20
+        num_pages = (total_results // items_per_page) + (1 if total_results % items_per_page > 0 else 0)
+        
+        c_pag1, c_pag2 = st.columns([1, 4])
+        with c_pag1:
+            page = st.number_input("Pagina", min_value=1, max_value=num_pages, step=1, key="archive_page")
+        
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        
+        # Rendering degli expander per i risultati filtrati
+        for _, r in df_v.iloc[start_idx:end_idx].iterrows():
+            with st.expander(f"ID {r['ID']} | {r['ARGOMENTO']} - {str(r['ESERCIZIO'])[:60]}..."):
+                col_info, col_main = st.columns([1, 2])
                 
-                # MODIFICA
-                with st.popover("📝 Modifica rapida"):
-                    new_ese = st.text_area("Testo", value=r['ESERCIZIO'], key=f"te_{r['ID']}")
-                    new_sol = st.text_input("Soluzione", value=r['SOLUZIONE'], key=f"ts_{r['ID']}")
-                    if st.button("Aggiorna", key=f"bu_{r['ID']}"):
-                        cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)
-                        if cell:
-                            st.session_state.ws.update_cell(cell.row, 7, new_ese)
-                            st.session_state.ws.update_cell(cell.row, 10, new_sol)
-                            st.cache_data.clear()
-                            st.rerun()
+                with col_info:
+                    st.write(f"**Disciplina:** {r['DISCIPLINA']}")
+                    st.write(f"**Tipo:** {r['TIPO']} | **Livello:** {r['LIVELLO']}")
+                    
+                    # Estrazione URL Immagine e visualizzazione corretta
+                    img_raw = str(r['IMMAGINE'])
+                    if "http" in img_raw:
+                        # Estrae l'URL tra le virgolette della formula =IMAGE("url")
+                        img_url = img_raw.split('"')[1] if '"' in img_raw else img_raw
+                        # CORREZIONE: usiamo width='stretch' invece di use_container_width=True
+                        st.image(img_url, width='stretch')
+                    else:
+                        st.info("Nessuna immagine")
+
+                with col_main:
+                    st.latex(r['ESERCIZIO'])
+                    
+                    # --- POPOVER DI MODIFICA COMPLETA ---
+                    with st.popover("📝 Modifica Integrale", use_container_width=True):
+                        st.markdown("### 🛠️ Editor Esercizio")
+                        st.subheader(f"ID: {r['ID']}")
+
+                        # Tre colonne invece di due per distribuire il carico orizzontalmente
+                        ed1, ed2, ed3 = st.columns(3)
+                        with ed1:
+                            new_disc = st.selectbox("Disciplina", all_disc, index=all_disc.index(r['DISCIPLINA']), key=f"ed_d_{r['ID']}")
+                            new_tipo = st.selectbox("Tipo", ["A", "C"], index=0 if r['TIPO']=="A" else 1, key=f"ed_t_{r['ID']}")
+                        with ed2:
+                            new_arg = st.text_input("Argomento", value=r['ARGOMENTO'], key=f"ed_a_{r['ID']}")
+                            new_sub = st.text_input("Subargomento", value=r['SUBARGOMENTO'], key=f"ed_s_{r['ID']}")
+                        with ed3:
+                            new_liv = st.selectbox("Livello", [1,2,3,4,5], index=int(r['LIVELLO'])-1, key=f"ed_l_{r['ID']}")
+                            new_sol = st.text_input("Soluzione", value=r['SOLUZIONE'], key=f"ed_sl_{r['ID']}")
+
+                        new_com = st.text_input("Comando", value=r['COMANDO'], key=f"ed_c_{r['ID']}")
+                        new_ese = st.text_area("Testo (LaTeX)", value=r['ESERCIZIO'], key=f"ed_e_{r['ID']}", height=200)
+                        new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
+
+                        if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", use_container_width=True):
+                            with st.spinner("Sincronizzazione modifiche in corso..."):
+                                # 1. Gestione immagine (mantiene vecchia o carica nuova)
+                                final_img_cell = r['IMMAGINE']
+                                if new_img_file:
+                                    new_url = upload_to_imgbb(new_img_file)
+                                    if new_url:
+                                        final_img_cell = f'=IMAGE("{new_url}")'
+
+                                # 2. Invio dati a Google Sheets (Batch Update per velocità)
+                                cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)
+                                if cell:
+                                    row_idx = cell.row
+                                    # Assicurati che l'ordine delle colonne (B, C, D...) corrisponda al tuo Sheet
+                                    updates = [
+                                        {'range': f'B{row_idx}', 'values': [[new_tipo]]},
+                                        {'range': f'C{row_idx}', 'values': [[new_disc]]},
+                                        {'range': f'D{row_idx}', 'values': [[new_arg]]},
+                                        {'range': f'E{row_idx}', 'values': [[new_sub]]},
+                                        {'range': f'F{row_idx}', 'values': [[new_com]]},
+                                        {'range': f'G{row_idx}', 'values': [[new_ese]]},
+                                        {'range': f'H{row_idx}', 'values': [[final_img_cell]]},
+                                        {'range': f'I{row_idx}', 'values': [[new_liv]]},
+                                        {'range': f'J{row_idx}', 'values': [[new_sol]]},
+                                    ]
+                                    st.session_state.ws.batch_update(updates, value_input_option='USER_ENTERED')
+
+                                    # --- 3. IL CUORE DEL REFRESH ---
+                                    st.cache_data.clear()  # Svuota la cache di load_data()
+                                    
+                                    # Ricarica i dati freschi da Google Sheets nel Session State
+                                    new_df, new_ws = load_data()
+                                    st.session_state.df = new_df
+                                    st.session_state.ws = new_ws
+                                    
+                                    st.success(f"✅ Record ID {r['ID']} aggiornato e database sincronizzato!")
+                                    # 2. Piccolo ritardo (es. 2 secondi)
+                                    time.sleep(2)
+
+                                    # Riavvia l'app per mostrare i nuovi dati nei filtri e negli expander
+                                    st.rerun()

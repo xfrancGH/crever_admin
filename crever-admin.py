@@ -203,11 +203,22 @@ with tab2:
         if s_liv != "Tutti":
             df_v = df_v[df_v['LIVELLO'].astype(str) == s_liv]
 
-    # Ricerca testuale libera
-    s_search = st.text_input("🔍 Cerca parole chiave nel testo LaTeX:", key="filter_search")
-    if s_search:
-        df_v = df_v[df_v['ESERCIZIO'].str.contains(s_search, case=False, na=False)]
+    # --- RICERCA SPECIFICA ---
+    c_search1, c_search2 = st.columns([1, 3])
+    
+    with c_search1:
+        # Ricerca per ID (accetta numeri o lascia vuoto)
+        s_id = st.text_input("🆔 Cerca ID specifico:", key="filter_id")
+        if s_id:
+            # Filtriamo per ID esatto (convertendo l'ID del DF in stringa per il confronto)
+            df_v = df_v[df_v['ID'].astype(str) == s_id.strip()]
 
+    with c_search2:
+        # Ricerca testuale libera (già presente, ma ora in colonna)
+        s_search = st.text_input("🔍 Cerca parole chiave nel testo dell'esercizio:", key="filter_search")
+        if s_search:
+            df_v = df_v[df_v['ESERCIZIO'].str.contains(s_search, case=False, na=False)]
+    
     st.divider()
 
     # --- VISUALIZZAZIONE E PAGINAZIONE ---
@@ -283,49 +294,52 @@ with tab2:
 
                         new_com = st.text_input("Comando", value=r['COMANDO'], key=f"ed_c_{r['ID']}")
                         new_ese = st.text_area("Testo (LaTeX)", value=r['ESERCIZIO'], key=f"ed_e_{r['ID']}", height=200)
-                        new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
+                        
+                        pl1, pl2 = st.columns([2, 1])
+                        with pl1:
+                            new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
+                        with pl2:
+                            if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", width='stretch'):
+                                with st.spinner("Sincronizzazione modifiche in corso..."):
+                                    # 1. Gestione immagine (mantiene vecchia o carica nuova)
+                                    final_img_cell = r['IMMAGINE']
+                                    if new_img_file:
+                                        new_url = upload_to_imgbb(new_img_file)
+                                        if new_url:
+                                            final_img_cell = f'=IMAGE("{new_url}")'
 
-                        if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", width='stretch'):
-                            with st.spinner("Sincronizzazione modifiche in corso..."):
-                                # 1. Gestione immagine (mantiene vecchia o carica nuova)
-                                final_img_cell = r['IMMAGINE']
-                                if new_img_file:
-                                    new_url = upload_to_imgbb(new_img_file)
-                                    if new_url:
-                                        final_img_cell = f'=IMAGE("{new_url}")'
+                                    # 2. Invio dati a Google Sheets (Batch Update per velocità)
+                                    cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)
+                                    if cell:
+                                        row_idx = cell.row
+                                        # Assicurati che l'ordine delle colonne (B, C, D...) corrisponda al tuo Sheet
+                                        updates = [
+                                            {'range': f'B{row_idx}', 'values': [[new_tipo]]},
+                                            {'range': f'C{row_idx}', 'values': [[new_disc]]},
+                                            {'range': f'D{row_idx}', 'values': [[new_arg]]},
+                                            {'range': f'E{row_idx}', 'values': [[new_sub]]},
+                                            {'range': f'F{row_idx}', 'values': [[new_com]]},
+                                            {'range': f'G{row_idx}', 'values': [[new_ese]]},
+                                            {'range': f'H{row_idx}', 'values': [[final_img_cell]]},
+                                            {'range': f'I{row_idx}', 'values': [[new_liv]]},
+                                            {'range': f'J{row_idx}', 'values': [[new_sol]]},
+                                        ]
+                                        st.session_state.ws.batch_update(updates, value_input_option='USER_ENTERED')
 
-                                # 2. Invio dati a Google Sheets (Batch Update per velocità)
-                                cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)
-                                if cell:
-                                    row_idx = cell.row
-                                    # Assicurati che l'ordine delle colonne (B, C, D...) corrisponda al tuo Sheet
-                                    updates = [
-                                        {'range': f'B{row_idx}', 'values': [[new_tipo]]},
-                                        {'range': f'C{row_idx}', 'values': [[new_disc]]},
-                                        {'range': f'D{row_idx}', 'values': [[new_arg]]},
-                                        {'range': f'E{row_idx}', 'values': [[new_sub]]},
-                                        {'range': f'F{row_idx}', 'values': [[new_com]]},
-                                        {'range': f'G{row_idx}', 'values': [[new_ese]]},
-                                        {'range': f'H{row_idx}', 'values': [[final_img_cell]]},
-                                        {'range': f'I{row_idx}', 'values': [[new_liv]]},
-                                        {'range': f'J{row_idx}', 'values': [[new_sol]]},
-                                    ]
-                                    st.session_state.ws.batch_update(updates, value_input_option='USER_ENTERED')
+                                        # --- 3. IL CUORE DEL REFRESH ---
+                                        st.cache_data.clear()  # Svuota la cache di load_data()
+                                        
+                                        # Ricarica i dati freschi da Google Sheets nel Session State
+                                        new_df, new_ws = load_data()
+                                        st.session_state.df = new_df
+                                        st.session_state.ws = new_ws
+                                        
+                                        st.success(f"✅ Record ID {r['ID']} aggiornato e database sincronizzato!")
+                                        # 2. Piccolo ritardo (es. 2 secondi)
+                                        time.sleep(2)
 
-                                    # --- 3. IL CUORE DEL REFRESH ---
-                                    st.cache_data.clear()  # Svuota la cache di load_data()
-                                    
-                                    # Ricarica i dati freschi da Google Sheets nel Session State
-                                    new_df, new_ws = load_data()
-                                    st.session_state.df = new_df
-                                    st.session_state.ws = new_ws
-                                    
-                                    st.success(f"✅ Record ID {r['ID']} aggiornato e database sincronizzato!")
-                                    # 2. Piccolo ritardo (es. 2 secondi)
-                                    time.sleep(2)
-
-                                    # Riavvia l'app per mostrare i nuovi dati nei filtri e negli expander
-                                    st.rerun()
+                                        # Riavvia l'app per mostrare i nuovi dati nei filtri e negli expander
+                                        st.rerun()
 
 # --- TAB 3: STATISTICHE (Versione High-Readability) ---
 with tab3:

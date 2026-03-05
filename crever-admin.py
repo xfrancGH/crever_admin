@@ -227,28 +227,45 @@ with tab2:
         
         # Rendering degli expander per i risultati filtrati
         for _, r in df_v.iloc[start_idx:end_idx].iterrows():
-            with st.expander(f"ID {r['ID']} | {r['ARGOMENTO']} - {str(r['ESERCIZIO'])[:60]}..."):
+            # Intestazione con ID, Argomento e Subargomento
+            with st.expander(f"(ID: {r['ID']}) | {r['ARGOMENTO']} ➔ {r['SUBARGOMENTO']}"):
+                
+                # Layout a due colonne bilanciate
                 col_info, col_main = st.columns([1, 2])
                 
                 with col_info:
-                    st.write(f"**Disciplina:** {r['DISCIPLINA']}")
-                    st.write(f"**Tipo:** {r['TIPO']} | **Livello:** {r['LIVELLO']}")
+                    # Metadati con stile omogeneo (senza icone eccessive o colori forti)
+                    st.markdown(f"**Disciplina:** {r['DISCIPLINA']}")
+                    st.markdown(f"**Tipo:** {r['TIPO']}")
+                    st.markdown(f"**Livello:** {r['LIVELLO']}")
+                    st.markdown(f"**Comando:**")
+                    st.write(r['COMANDO'])
                     
-                    # Estrazione URL Immagine e visualizzazione corretta
+                    # Gestione Immagine sotto i dati tecnici
                     img_raw = str(r['IMMAGINE'])
                     if "http" in img_raw:
-                        # Estrae l'URL tra le virgolette della formula =IMAGE("url")
                         img_url = img_raw.split('"')[1] if '"' in img_raw else img_raw
-                        # CORREZIONE: usiamo width='stretch' invece di use_container_width=True
                         st.image(img_url, width='stretch')
                     else:
-                        st.info("Nessuna immagine")
+                        st.caption("Nessuna immagine associata")
 
                 with col_main:
-                    st.latex(r['ESERCIZIO'])
+                    # Sezione Testo Esercizio
+                    st.markdown("**Testo dell'Esercizio:**")
+                    # st.latex(r['ESERCIZIO'])
+                    st.write(r['ESERCIZIO'])
+                    
+                    st.markdown("---") # Linea di separazione sottile
+                    
+                    # Sezione Soluzione
+                    st.markdown("**Soluzione:**")
+                    # st.latex(r['SOLUZIONE'])
+                    st.write(r['SOLUZIONE'])
+
+
                     
                     # --- POPOVER DI MODIFICA COMPLETA ---
-                    with st.popover("📝 Modifica Integrale", use_container_width=True):
+                    with st.popover("📝 Modifica Integrale", width='stretch'):
                         st.markdown("### 🛠️ Editor Esercizio")
                         st.subheader(f"ID: {r['ID']}")
 
@@ -262,13 +279,13 @@ with tab2:
                             new_sub = st.text_input("Subargomento", value=r['SUBARGOMENTO'], key=f"ed_s_{r['ID']}")
                         with ed3:
                             new_liv = st.selectbox("Livello", [1,2,3,4,5], index=int(r['LIVELLO'])-1, key=f"ed_l_{r['ID']}")
-                            new_sol = st.text_input("Soluzione", value=r['SOLUZIONE'], key=f"ed_sl_{r['ID']}")
+                            new_sol = st.text_input("Soluzione (LaTeX)", value=r['SOLUZIONE'], key=f"ed_sl_{r['ID']}")
 
                         new_com = st.text_input("Comando", value=r['COMANDO'], key=f"ed_c_{r['ID']}")
                         new_ese = st.text_area("Testo (LaTeX)", value=r['ESERCIZIO'], key=f"ed_e_{r['ID']}", height=200)
                         new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
 
-                        if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", use_container_width=True):
+                        if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", width='stretch'):
                             with st.spinner("Sincronizzazione modifiche in corso..."):
                                 # 1. Gestione immagine (mantiene vecchia o carica nuova)
                                 final_img_cell = r['IMMAGINE']

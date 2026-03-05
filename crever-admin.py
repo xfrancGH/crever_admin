@@ -103,6 +103,19 @@ with tab1:
         
         sub_final = st.text_input("Digita nome nuovo Sub-argomento") if sub_sel == "+ NUOVO SUB-ARGOMENTO" else sub_sel
 
+    tex1, tex2 = st.columns(2)
+    with tex1:
+        esercizio = st.text_area("Testo Esercizio (LaTeX)", height=150, help="Scrivi qui il codice LaTeX")
+    with tex2:
+        # Il container border=True crea un bel box che bilancia visivamente la text_area
+        # with st.container(border=True):
+        st.caption("🔍 Anteprima Renderizzata:")
+        if esercizio:
+            st.write(esercizio)
+        else:
+            st.info("Il rendering apparirà qui...")
+        st.divider()
+
     # --- FORM PER IL RESTO DEI CAMPI ---
     with st.form("insert_form", clear_on_submit=True):
         c5, c6 = st.columns(2)
@@ -113,10 +126,12 @@ with tab1:
             livello = st.selectbox("Livello", [1, 2, 3, 4, 5])
             soluzione = st.text_input("Soluzione (LaTeX)")
 
-        esercizio = st.text_area("Testo Esercizio (LaTeX)")
-        img_file = st.file_uploader("Immagine", type=['png', 'jpg'])
-
-        submit = st.form_submit_button("SALVA ESERCIZIO")
+        c7, c8 = st.columns([2,1])
+        with c7:
+            img_file = st.file_uploader("Immagine", type=['png', 'jpg'])
+        with c8:
+            submit = st.form_submit_button("SALVA ESERCIZIO", width='stretch')
+            st.divider()
 
     if submit:
         if not esercizio or not arg_final or not sub_final:
@@ -299,6 +314,7 @@ with tab2:
                         with pl1:
                             new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
                         with pl2:
+                            st.divider()
                             if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", width='stretch'):
                                 with st.spinner("Sincronizzazione modifiche in corso..."):
                                     # 1. Gestione immagine (mantiene vecchia o carica nuova)

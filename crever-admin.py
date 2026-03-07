@@ -148,7 +148,7 @@ with tab1:
                     except: st.warning("Errore upload immagine.")
 
                 new_id = int(df_m['ID'].max()) + 1 if not df_m.empty else 0
-                img_cell = f'=IMAGE("{img_url}")' if img_url else ""
+                img_cell = f'IMAGE("{img_url}")' if img_url else ""
                 
                 # Mapping preciso colonne Sheet: ID, TIPO, DISCIPLINA, ARGOMENTO, SUBARGOMENTO, COMANDO, ESERCIZIO, IMMAGINE, LIVELLO, SOLUZIONE
                 riga = [new_id, tipo_ui[0], disciplina, arg_final, sub_final, comando, esercizio, img_cell, livello, soluzione]
@@ -322,7 +322,7 @@ with tab2:
                                     if new_img_file:
                                         new_url = upload_to_imgbb(new_img_file)
                                         if new_url:
-                                            final_img_cell = f'=IMAGE("{new_url}")'
+                                            final_img_cell = f'IMAGE("{new_url}")'
 
                                     # 2. Invio dati a Google Sheets (Batch Update per velocità)
                                     cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)

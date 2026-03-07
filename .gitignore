@@ -4,3 +4,4 @@ venv/
 .env
 .streamlit/secrets.toml
 credenziali_google.json
+images/

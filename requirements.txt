@@ -1,7 +1,5 @@
-streamlit
-st-gsheets-connection
 pandas
 requests
+streamlit
 gspread
 google-auth
-time

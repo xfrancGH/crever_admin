@@ -7,28 +7,32 @@ import os
 import time
 from google.oauth2.service_account import Credentials
 
-# --- 1. CONFIGURAZIONE E LOGIN ---
+# --- LOGICA DI LOGIN PIÙ "STANDARD" ---
 def check_password():
-    """Restituisce True se l'utente ha inserito la password corretta."""
-    def password_entered():
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Rimuove la password dallo stato
-        else:
-            st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
-        # Prima volta che si accede
-        st.text_input("Password:", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        # Password errata
-        st.text_input("Password:", type="password", on_change=password_entered, key="password")
-        st.error("Password errata 😕")
-        return False
-    else:
-        # Password corretta
-        return True
+        st.session_state["password_correct"] = False
+    
+    if not st.session_state["password_correct"]:
+        # Aggiungiamo un titolo che contenga la parola "Login"
+        st.subheader("Login di Accesso")
+        
+        with st.form("login_form"):
+            # Un campo username (anche se disabilitato) aiuta il browser a capire il contesto
+            st.text_input("Username", value="Utente", disabled=True)
+            # Il campo password DEVE essere l'ultimo prima del bottone
+            password = st.text_input("Password", type="password")
+            submit = st.form_submit_button("Accedi")
+            
+            if submit:
+                if password == st.secrets["APP_PASSWORD"]:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("Password errata")
+        
+        # STOP: impediamo al resto della pagina di caricarsi se non loggati
+        st.stop() 
+    return True
 
 # --- ESECUZIONE PRINCIPALE ---
 if check_password():

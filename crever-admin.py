@@ -7,7 +7,6 @@ import os
 import time
 from google.oauth2.service_account import Credentials
 
-
 # --- 1. CONFIGURAZIONE E LOGIN ---
 def check_password():
     """Restituisce True se l'utente ha inserito la password corretta."""
@@ -20,11 +19,11 @@ def check_password():
 
     if "password_correct" not in st.session_state:
         # Prima volta che si accede
-        st.text_input("Inserisci Password per accedere:", type="password", on_change=password_entered, key="password")
+        st.text_input("Password:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
         # Password errata
-        st.text_input("Inserisci Password per accedere:", type="password", on_change=password_entered, key="password")
+        st.text_input("Password:", type="password", on_change=password_entered, key="password")
         st.error("Password errata 😕")
         return False
     else:

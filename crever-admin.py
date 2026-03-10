@@ -18,7 +18,7 @@ def check_password():
         
         with st.form("login_form"):
             # Un campo username (anche se disabilitato) aiuta il browser a capire il contesto
-            st.text_input("Username", value="Utente", disabled=True)
+            st.text_input("Username", value="Admin", disabled=True)
             # Il campo password DEVE essere l'ultimo prima del bottone
             password = st.text_input("Password", type="password")
             submit = st.form_submit_button("Accedi")

@@ -2,101 +2,75 @@ import streamlit as st
 import pandas as pd
 import requests
 import base64
-import gspread
-import os
 import time
-from google.oauth2.service_account import Credentials
+import os
+import gspread
+from streamlit_gsheets import GSheetsConnection
+import warnings
 
-# --- LOGICA DI LOGIN PIÙ "STANDARD" ---
+# Filtriamo solo il warning specifico di gspread senza nascondere altri errori importanti
+warnings.filterwarnings("ignore", message=".*Method signature's arguments 'range_name' and 'values' will change their order.*")
+
+# --- 1. CONFIGURAZIONE E LOGIN ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
     
     if not st.session_state["password_correct"]:
-        # Aggiungiamo un titolo che contenga la parola "Login"
         st.subheader("Login di Accesso")
-        
         with st.form("login_form"):
-            # Un campo username (anche se disabilitato) aiuta il browser a capire il contesto
             st.text_input("Username", value="Admin", disabled=True)
-            # Il campo password DEVE essere l'ultimo prima del bottone
             password = st.text_input("Password", type="password")
             submit = st.form_submit_button("Accedi")
-            
             if submit:
                 if password == st.secrets["APP_PASSWORD"]:
                     st.session_state["password_correct"] = True
                     st.rerun()
                 else:
                     st.error("Password errata")
-        
-        # STOP: impediamo al resto della pagina di caricarsi se non loggati
         st.stop() 
     return True
 
-# --- ESECUZIONE PRINCIPALE ---
+# --- 2. FUNZIONI DI SUPPORTO ---
+@st.cache_resource
+def get_conn():
+    return st.connection("gsheets", type=GSheetsConnection)
+
+@st.cache_data(ttl=600)
+def load_data():
+    conn = get_conn()
+    df = conn.read(spreadsheet=st.secrets["connections"]["gsheets"]["spreadsheet"])
+    df = df.dropna(how="all")
+    df.columns = [c.upper().strip() for c in df.columns]
+    
+    # Forza ID a intero. Se ci sono NaN, gestiscili come 0 o rimuovili
+    if 'ID' in df.columns:
+        df['ID'] = pd.to_numeric(df['ID'], errors='coerce').fillna(0).astype(int)
+        
+    return df
+
+def upload_to_imgbb(uploaded_file):
+    if not uploaded_file: return None
+    api_key = st.secrets["IMGBB_API_KEY"]
+    img_b64 = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
+    file_name_raw = os.path.splitext(uploaded_file.name)[0]
+    payload = {"key": api_key, "image": img_b64, "name": file_name_raw}
+    res = requests.post("https://api.imgbb.com/1/upload", data=payload).json()
+    return res["data"]["url"] if res["status"] == 200 else None
+
+def sanitize(val):
+    # Converte NaN o None in stringa vuota, altrimenti mantiene il valore
+    if pd.isna(val) or val is None:
+        return ""
+    return val
+
+# --- 3. ESECUZIONE PRINCIPALE ---
 if check_password():
-    # --- 1. CONFIGURAZIONE E CACHE ---
-    def get_gspread_client():
-        creds_info = st.secrets["connections"]["gsheets"]
-        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-        return gspread.authorize(creds)
-
-    @st.cache_data(ttl=600)
-    def load_data():
-        gc = get_gspread_client()
-        ws = gc.open_by_url(st.secrets["connections"]["gsheets"]["spreadsheet"]).get_worksheet(0)
-        data = ws.get_all_records(value_render_option='FORMULA')
-        df = pd.DataFrame(data).dropna(how="all")
-        df.columns = [c.upper().strip() for c in df.columns]
-        return df, ws
-
-    import os
-
-    import os
-    import requests
-    import base64
-
-    def upload_to_imgbb(uploaded_file):
-        if not uploaded_file: return None
-        
-        api_key = st.secrets["IMGBB_API_KEY"]
-        url = "https://api.imgbb.com/1/upload"
-        
-        # Codifica l'immagine
-        img_b64 = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-        
-        # Estraiamo il nome senza estensione (es. id_84.png -> id_84)
-        # ImgBB aggiungerà l'estensione corretta automaticamente
-        file_name_raw = os.path.splitext(uploaded_file.name)[0]
-        
-        payload = {
-            "key": api_key,
-            "image": img_b64,
-            "name": file_name_raw  # Carica con il nome originale nella root
-        }
-        
-        try:
-            response = requests.post(url, data=payload)
-            json_res = response.json()
-            
-            if json_res["status"] == 200:
-                # Restituisce l'URL diretto dell'immagine
-                return json_res["data"]["url"]
-            else:
-                st.error(f"Errore ImgBB: {json_res['error']['message']}")
-                return None
-        except Exception as e:
-            st.error(f"Errore di connessione durante l'upload: {e}")
-            return None
-
-    if 'df' not in st.session_state:
-        df, ws = load_data()
-        st.session_state.df = df
-        st.session_state.ws = ws
-
     st.set_page_config(page_title="Math Archive Pro", layout="wide")
+    
+    if 'df' not in st.session_state:
+        st.session_state.df = load_data()
+
     tab1, tab2, tab3 = st.tabs(["➕ Inserimento", "🔍 Archivio", "📊 Statistiche"])
 
     # --- TAB 1: INSERIMENTO ---
@@ -104,48 +78,37 @@ if check_password():
         st.header("Nuovo Esercizio")
         df_m = st.session_state.df
 
-        # --- LOGICA A CASCATA (FUORI DAL FORM PER REATTIVITÀ) ---
+        # --- LOGICA A CASCATA ---
         c1, c2 = st.columns(2)
         with c1:
-            # 1. DISCIPLINA
             all_disc = sorted(df_m['DISCIPLINA'].unique().tolist()) if not df_m.empty else ["Matematica", "Fisica"]
             disciplina = st.selectbox("Disciplina", all_disc)
             filtered_args = sorted(df_m[df_m['DISCIPLINA'] == disciplina]['ARGOMENTO'].unique().tolist())
         with c2:
-            # Calcolo dell'ID per il prossimo inserimento
-            next_id_display = int(st.session_state.df['ID'].max() + 1) if not st.session_state.df.empty else 0
+            next_id_display = int(df_m['ID'].max() + 1) if not df_m.empty else 0
             st.text_input("ID Prossimo Esercizio", value=next_id_display, disabled=True)
             
-        # --- LOGICA A CASCATA (FUORI DAL FORM PER REATTIVITÀ) ---
         c3, c4 = st.columns(2)
         with c3:
-            # 2. ARGOMENTO (Filtrato)
             arg_sel = st.selectbox("Seleziona Argomento", ["+ NUOVO ARGOMENTO"] + filtered_args)
             arg_final = st.text_input("Digita nome nuovo Argomento") if arg_sel == "+ NUOVO ARGOMENTO" else arg_sel
         with c4:
-            # 4. SUBARGOMENTO (Filtrato)
             if arg_sel != "+ NUOVO ARGOMENTO":
                 filtered_subs = sorted(df_m[df_m['ARGOMENTO'] == arg_sel]['SUBARGOMENTO'].unique().tolist())
                 sub_sel = st.selectbox("Seleziona Sub-argomento", ["+ NUOVO SUB-ARGOMENTO"] + filtered_subs)
             else:
                 sub_sel = "+ NUOVO SUB-ARGOMENTO"
-            
             sub_final = st.text_input("Digita nome nuovo Sub-argomento") if sub_sel == "+ NUOVO SUB-ARGOMENTO" else sub_sel
 
         tex1, tex2 = st.columns(2)
         with tex1:
-            esercizio = st.text_area("Testo Esercizio (LaTeX)", height=150, help="Scrivi qui il codice LaTeX")
+            esercizio = st.text_area("Testo Esercizio (LaTeX)", height=150)
         with tex2:
-            # Il container border=True crea un bel box che bilancia visivamente la text_area
-            # with st.container(border=True):
             st.caption("🔍 Anteprima Renderizzata:")
-            if esercizio:
-                st.write(esercizio)
-            else:
-                st.info("Il rendering apparirà qui...")
-            st.divider()
+            if esercizio: st.write(esercizio)
+            else: st.info("Il rendering apparirà qui...")
 
-        # --- FORM PER IL RESTO DEI CAMPI ---
+        # --- FORM DI INVIO ---
         with st.form("insert_form", clear_on_submit=True):
             c5, c6 = st.columns(2)
             with c5:
@@ -154,58 +117,59 @@ if check_password():
             with c6:
                 livello = st.selectbox("Livello", [1, 2, 3, 4, 5])
                 soluzione = st.text_input("Soluzione (LaTeX)")
-
-            c7, c8 = st.columns([2,1])
-            with c7:
-                img_file = st.file_uploader("Immagine", type=['png', 'jpg'])
-            with c8:
-                submit = st.form_submit_button("SALVA ESERCIZIO", width='stretch')
-                st.divider()
+            img_file = st.file_uploader("Immagine", type=['png', 'jpg'])
+            submit = st.form_submit_button("SALVA ESERCIZIO")
 
         if submit:
             if not esercizio or not arg_final or not sub_final:
-                st.error("⚠️ Errore: Assicurati di aver inserito Argomento, Sub-argomento e Testo!")
+                st.error("⚠️ Errore: Inserisci Argomento, Sub-argomento e Testo!")
             else:
-                with st.spinner("Registrazione in corso e sincronizzazione database..."):
-                    img_url = upload_to_imgbb(img_file) # La funzione ora gestisce nome e album
-                    if img_file:
-                        try:
-                            api_key = st.secrets["IMGBB_API_KEY"]
-                            img_b64 = base64.b64encode(img_file.getvalue()).decode('utf-8')
-                            res = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": img_b64})
-                            img_url = res.json()["data"]["url"]
-                        except: st.warning("Errore upload immagine.")
-
-                    new_id = int(df_m['ID'].max()) + 1 if not df_m.empty else 0
+                with st.spinner("Sincronizzazione database..."):
+                    # Upload immagine
+                    img_url = upload_to_imgbb(img_file)
                     img_cell = f'IMAGE("{img_url}")' if img_url else ""
                     
-                    # Mapping preciso colonne Sheet: ID, TIPO, DISCIPLINA, ARGOMENTO, SUBARGOMENTO, COMANDO, ESERCIZIO, IMMAGINE, LIVELLO, SOLUZIONE
-                    riga = [new_id, tipo_ui[0], disciplina, arg_final, sub_final, comando, esercizio, img_cell, livello, soluzione]
-                    
-                    # 1. Scrittura su Google Sheets
-                    st.session_state.ws.append_row(riga, value_input_option='USER_ENTERED')
-                    
-                    # 2. PULIZIA CACHE E AGGIORNAMENTO SESSION STATE
-                    st.cache_data.clear() # Svuota la cache della funzione load_data()
-                    
-                    # Ricarichiamo i dati aggiornati per riflettere i nuovi Argomenti/Subargomenti
-                    new_df, new_ws = load_data()
-                    st.session_state.df = new_df
-                    st.session_state.ws = new_ws
+                    # Preparazione nuova riga
+                    new_id = int(df_m['ID'].max() + 1) if not df_m.empty else 0
+                    riga_data = {
+                        'ID': [new_id], 'TIPO': [tipo_ui[0]], 'DISCIPLINA': [disciplina],
+                        'ARGOMENTO': [arg_final], 'SUBARGOMENTO': [sub_final], 'COMANDO': [comando],
+                        'ESERCIZIO': [esercizio], 'IMMAGINE': [img_cell], 'LIVELLO': [livello], 'SOLUZIONE': [soluzione]
+                    }
+                    #new_row_df = pd.DataFrame(riga_data)
+
+                    # --- NUOVO (CORRETTO) ---
+                    riga_lista = [
+                        new_id, 
+                        tipo_ui[0], 
+                        disciplina, 
+                        arg_final, 
+                        sub_final, 
+                        comando, 
+                        esercizio, 
+                        img_cell, 
+                        livello, 
+                        soluzione
+                    ]
+
+                    conn = get_conn()
+                    # Usiamo le credenziali della connessione per autenticare gspread al volo
+                    creds = st.secrets["connections"]["gsheets"]
+                    gc = gspread.service_account_from_dict(creds)
+                    sh = gc.open_by_url(creds["spreadsheet"])
+                    ws = sh.worksheet("db_esercizi")
+                    ws.append_row(riga_lista, value_input_option='USER_ENTERED')
+
+                    st.cache_data.clear() 
+                    st.session_state.df = load_data()
                     
                     st.success(f"✅ Esercizio salvato con ID {new_id}!")
-                    # 2. Piccolo ritardo (es. 2 secondi)
-                    time.sleep(2)                
-                    
-                    # 3. RE-RUN PER AGGIORNARE I WIDGET
+                    time.sleep(1)
                     st.rerun()
-
 
     # --- TAB 2: ARCHIVIO ---
     with tab2:
         st.header("Ricerca e Gestione Esercizi")
-        
-        # Usiamo i dati in session_state per la massima velocità
         df_v = st.session_state.df.copy()
 
         # --- FILTRI IN COLONNA (ORDINE RICHIESTO) ---
@@ -265,7 +229,7 @@ if check_password():
         
         st.divider()
 
-        # --- VISUALIZZAZIONE E PAGINAZIONE ---
+        # --- VISUALIZZAZIONE ---
         total_results = len(df_v)
         st.write(f"Risultati trovati: **{total_results}**")
 
@@ -282,9 +246,8 @@ if check_password():
             
             # Rendering degli expander per i risultati filtrati
             for _, r in df_v.iloc[start_idx:end_idx].iterrows():
-                # Intestazione con ID, Argomento e Subargomento
-                with st.expander(f"(ID: {r['ID']}) | {r['ARGOMENTO']} ➔ {r['SUBARGOMENTO']}"):
-                    
+                with st.expander(f"(ID: {r['ID']}) | {r['ARGOMENTO']} ➔ {r['SUBARGOMENTO']}"):                    
+                   
                     # Layout a due colonne bilanciate
                     col_info, col_main = st.columns([1, 2])
                     
@@ -316,10 +279,8 @@ if check_password():
                         st.markdown("**Soluzione:**")
                         # st.latex(r['SOLUZIONE'])
                         st.write(r['SOLUZIONE'])
-
-
-                        
-                        # --- POPOVER DI MODIFICA COMPLETA ---
+              
+                        # --- POPOVER DI MODIFICA INTEGRATO ---
                         with st.popover("📝 Modifica Integrale", width='stretch'):
                             st.markdown("### 🛠️ Editor Esercizio")
                             st.subheader(f"ID: {r['ID']}")
@@ -336,59 +297,61 @@ if check_password():
                                 new_liv = st.selectbox("Livello", [1,2,3,4,5], index=int(r['LIVELLO'])-1, key=f"ed_l_{r['ID']}")
                                 new_sol = st.text_input("Soluzione (LaTeX)", value=r['SOLUZIONE'], key=f"ed_sl_{r['ID']}")
 
-                            new_com = st.text_input("Comando", value=r['COMANDO'], key=f"ed_c_{r['ID']}")
+                            cm, im = st.columns(2)
+                            with cm:
+                                new_com = st.text_input("Comando", value=r['COMANDO'], key=f"ed_c_{r['ID']}")
+                            with im:
+                                new_img = st.text_input("Immagine", value=r['IMMAGINE'], key=f"ed_i_{r['ID']}",disabled=True)
+
                             new_ese = st.text_area("Testo (LaTeX)", value=r['ESERCIZIO'], key=f"ed_e_{r['ID']}", height=200)
                             
                             pl1, pl2 = st.columns([2, 1])
                             with pl1:
-                                new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_i_{r['ID']}")
+                                new_img_file = st.file_uploader("Cambia Immagine", type=['png', 'jpg'], key=f"ed_j_{r['ID']}")
                             with pl2:
                                 st.divider()
                                 if st.button("AGGIORNA TUTTO", key=f"save_all_{r['ID']}", width='stretch'):
-                                    with st.spinner("Sincronizzazione modifiche in corso..."):
-                                        # 1. Gestione immagine (mantiene vecchia o carica nuova)
+                                    with st.spinner("Sincronizzazione in corso..."):
+                                        # 1. Gestione Immagine
                                         final_img_cell = r['IMMAGINE']
                                         if new_img_file:
                                             new_url = upload_to_imgbb(new_img_file)
-                                            if new_url:
-                                                final_img_cell = f'IMAGE("{new_url}")'
+                                            if new_url: final_img_cell = f'IMAGE("{new_url}")'
 
-                                        # 2. Invio dati a Google Sheets (Batch Update per velocità)
-                                        cell = st.session_state.ws.find(str(int(r['ID'])), in_column=1)
-                                        if cell:
-                                            row_idx = cell.row
-                                            # Assicurati che l'ordine delle colonne (B, C, D...) corrisponda al tuo Sheet
-                                            updates = [
-                                                {'range': f'B{row_idx}', 'values': [[new_tipo]]},
-                                                {'range': f'C{row_idx}', 'values': [[new_disc]]},
-                                                {'range': f'D{row_idx}', 'values': [[new_arg]]},
-                                                {'range': f'E{row_idx}', 'values': [[new_sub]]},
-                                                {'range': f'F{row_idx}', 'values': [[new_com]]},
-                                                {'range': f'G{row_idx}', 'values': [[new_ese]]},
-                                                {'range': f'H{row_idx}', 'values': [[final_img_cell]]},
-                                                {'range': f'I{row_idx}', 'values': [[new_liv]]},
-                                                {'range': f'J{row_idx}', 'values': [[new_sol]]},
-                                            ]
-                                            st.session_state.ws.batch_update(updates, value_input_option='USER_ENTERED')
+                                        # --- LOGICA CORRETTA TAB 2 ---
+                                        conn = get_conn()
+                                        creds = st.secrets["connections"]["gsheets"]
+                                        gc = gspread.service_account_from_dict(creds)
+                                        sh = gc.open_by_url(creds["spreadsheet"])
+                                        ws = sh.worksheet("db_esercizi")
 
-                                            # --- 3. IL CUORE DEL REFRESH ---
-                                            st.cache_data.clear()  # Svuota la cache di load_data()
-                                            
-                                            # Ricarica i dati freschi da Google Sheets nel Session State
-                                            new_df, new_ws = load_data()
-                                            st.session_state.df = new_df
-                                            st.session_state.ws = new_ws
-                                            
-                                            st.success(f"✅ Record ID {r['ID']} aggiornato e database sincronizzato!")
-                                            # 2. Piccolo ritardo (es. 2 secondi)
-                                            time.sleep(2)
+                                        # Aggiornamento
+                                        original_idx = st.session_state.df.index[st.session_state.df['ID'] == r['ID']][0]
+                                        row_to_update = original_idx + 2
+                                        updated_row = [int(r['ID']), new_tipo, new_disc, new_arg, new_sub, new_com, new_ese, final_img_cell, new_liv, new_sol]
 
-                                            # Riavvia l'app per mostrare i nuovi dati nei filtri e negli expander
-                                            st.rerun()
+                                        updated_row_clean = [sanitize(x) for x in [
+                                            int(r['ID']), new_tipo, new_disc, new_arg, new_sub, 
+                                            new_com, new_ese, final_img_cell, new_liv, new_sol
+                                        ]]
+
+                                        ws.update(
+                                            values=[updated_row_clean], 
+                                            range_name=f'A{row_to_update}:J{row_to_update}', 
+                                            value_input_option='USER_ENTERED'
+                                        )
+
+                                        # 3. Refresh dati
+                                        st.cache_data.clear()
+                                        st.session_state.df = load_data()
+                                        
+                                        st.success(f"✅ Record {r['ID']} aggiornato!")
+                                        time.sleep(1)
+                                        st.rerun()
 
     # --- TAB 3: STATISTICHE (Versione High-Readability) ---
     with tab3:
-        df_tree = st.session_state.df.copy()
+        df_tree = st.session_state.df
 
         if not df_tree.empty:
             # 1. TOTALONE IN CIMA

@@ -3,5 +3,5 @@ pandas
 requests
 gspread
 google-auth
-altair==6.0.0
 streamlit-gsheets
+altair

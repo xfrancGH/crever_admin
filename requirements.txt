@@ -3,5 +3,5 @@ pandas
 requests
 gspread
 google-auth
-streamlit-gsheets
+st-gsheets-connection
 altair
